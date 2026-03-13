@@ -1,235 +1,211 @@
 ---
 name: weibo-ck
 description: 每月查看微博监控账号的近3个月动态并生成Word报告。当用户输入"weibo-ck"、"查看微博动态"、"生成微博月报"、或提到要查看微博监控账号动态时，必须立即触发此 skill，按照标准流程依次处理所有账号。
-version: 1.0.0
+version: 2.0.0
 ---
 
-# 微博月度动态监控 (weibo-ck)
-
-## 配置说明
-
-> ⚠️ 使用前必须修改以下两处配置：
-> 1. **监控账号列表** — 替换为你自己要监控的微博账号
-> 2. **输出目录** — 替换为你本地的文件保存路径
-
----
+# 微博动态监控 (weibo-ck)
 
 ## 监控账号列表
 
-> 修改此表格，填入你要监控的微博账号。userId（微博uid）可在该账号主页 URL `weibo.com/u/{uid}` 中找到。
-
-| 昵称 | userId（微博uid） | 简介 |
-|------|-----------------|------|
-| 账号昵称1 | `请填入微博uid` | 备注说明 |
-| 账号昵称2 | `请填入微博uid` | 备注说明 |
+| 昵称 | userId（微博uid） |
+|------|-----------------|
+| 主持人郭灿亮 | `1548718464` |
+| M赵路 | `1881976852` |
+| 胡盛呢 | `1680206441` |
+| 小泠是ling不是leng | `5997250222` |
+| 青鸢小妞子 | `1865587582` |
+| 杨越VJ | `1000891302` |
+| 小青青88 | `1877781754` |
+| 言午日月 | `1463765784` |
+| 门芯羽 | `1840892682` |
+| 咬咬ayao | `1818134777` |
+| 童鑫Aka_B-Rabbit | `1989026297` |
+| 王燕华EVA | `1887126080` |
+| 赵菁candyjj | `1720896651` |
+| 范鸣迅 | `2815750065` |
+| Jessie杨柳 | `1805029353` |
+| 魔都小蔚99 | `1833890324` |
 
 ## 输出目录
 
-所有 Word 文件保存到：`YOUR_OUTPUT_DIR`
+`C:/Users/yangc/Documents/Agent001/`
 
-> 示例：`C:/Users/yourname/Documents/reports/`
-
-文件命名格式：`{昵称}_微博近3个月动态报告.docx`
+文件命名格式：`微博动态_{查询日期}.xlsx`
 
 ---
 
 ## 完整工作流程
 
-### 第一步：确认浏览器与登录状态
+### 第一步：确认查询日期
 
-1. 调用 `list_pages` 检查浏览器是否已打开
-2. 如果没有微博页面，调用 `new_page` 打开 `https://weibo.com`
-3. 等待页面加载，调用 `take_snapshot` 判断是否已登录：
-   - ✅ 已登录（页面显示首页 feed、头像等）→ 直接进入第二步
-   - ❌ 未登录（显示登录页或注册引导）→ 调用 `navigate_page` 前往 `https://passport.weibo.com/sso/signin`，提示用户扫码登录，等待用户确认后继续
+用户会告知要查看的日期（如"3月10日"），记录为 `targetDate`（格式 `YYYY-MM-DD`）。
 
-> 登录状态会过期，不要跳过检查。
+如果用户没有指定日期，询问用户要查看哪一天的内容。
 
 ---
 
-### 第二步：逐账号处理
+### 第二步：确认浏览器登录状态
 
-对每个账号依次执行以下操作：
+调用 `list_pages` 检查是否有微博页面。
 
-#### 2a. 前往账号主页
+若无，调用 `new_page` 打开 `https://weibo.com`，调用 `take_screenshot` 确认：
+- ✅ 已登录（显示首页 feed、头像）→ 继续
+- ❌ 未登录（显示登录页）→ 提示用户在浏览器中手动登录，等待确认后继续
 
-调用 `navigate_page`，URL 为：`https://weibo.com/u/{userId}`
+---
 
-等待页面加载（`wait_for` 等待账号昵称文字出现）。
+### 第三步：逐账号抓取数据
 
-#### 2b. 获取账号基本信息
+对每个账号依次执行：
 
-调用 `take_snapshot` 或 `evaluate_script` 提取以下信息：
-- 昵称、粉丝数、关注数、简介、IP属地
-- 如有视频播放量、转评赞总计也一并记录
+#### 3a. 打开账号主页
 
-```javascript
-// 提取账号基本信息
-(() => {
-  const name = document.querySelector('.ProfileHeader_name_1KbBs, [class*="name"]')?.innerText?.trim();
-  const fans = document.querySelector('[class*="fans"] span, [class*="follower"] span')?.innerText?.trim();
-  const follow = document.querySelector('[class*="follow"] span')?.innerText?.trim();
-  const desc = document.querySelector('[class*="desc"], [class*="intro"]')?.innerText?.trim();
-  return { name, fans, follow, desc };
-})()
+```
+navigate_page → https://weibo.com/u/{userId}
 ```
 
-如果选择器失效，改用 `take_snapshot` 手动从快照文本中提取。
+等待页面加载（调用 `take_screenshot` 确认已显示账号内容）。
 
-#### 2c. 滚动收集近3个月微博
+#### 3b. 滚动提取帖子
 
-**日期截止计算：**
-
-```javascript
-// 3个月前的日期
-const cutoff = new Date();
-cutoff.setMonth(cutoff.getMonth() - 3);
-```
-
-**滚动策略：**
-
-每轮执行 `evaluate_script` 滚动页面并提取帖子，循环直到满足停止条件：
+调用 `evaluate_script` 提取当前可见帖子：
 
 ```javascript
-// 滚动并提取帖子
-(() => {
-  window.scrollBy(0, 2000);
+() => {
   const posts = [];
-  document.querySelectorAll('article').forEach(el => {
-    const text = el.innerText;
-    const timeEl = el.querySelector('time, [class*="time"], a[href*="detail"]');
-    posts.push({ text: text.slice(0, 300), time: timeEl?.getAttribute('datetime') || timeEl?.innerText });
+  const seen = new Set();
+  document.querySelectorAll('article, [class*="Feed_body"], [class*="wbpro-feed-content"]').forEach(el => {
+    const text = el.innerText?.trim().slice(0, 200) || '';
+    if (!text || seen.has(text.slice(0, 50))) return;
+    seen.add(text.slice(0, 50));
+    const timeEl = el.querySelector('time, a[class*="time"], [class*="time"] a');
+    const datetime = timeEl?.getAttribute('datetime') || timeEl?.innerText?.trim() || '';
+    const link = el.querySelector('a[href*="/detail/"]')?.getAttribute('href') || '';
+    posts.push({ text, datetime, link });
   });
   return posts;
-})()
+}
 ```
 
-**停止条件（满足任一即停）：**
-- 连续滚动 3 轮都没有出现新帖子
-- 最早帖子的日期已早于截止日期（3个月前）
-- 总滚动次数超过 60 次（防止无限循环）
+**滚动策略：** 每次滚动 2000px，最多滚动 30 次，满足以下任一条件停止：
+- 找到目标日期的帖子
+- 最早帖子日期已早于 targetDate 超过 3 天（确认无遗漏后停止）
+- 连续 3 轮无新帖子出现
 
-**帖子去重：** 按帖子文本前50字符去重，避免重复收录懒加载中的重复条目。
+滚动脚本：
+```javascript
+() => { window.scrollBy(0, 2000); return window.scrollY; }
+```
 
-#### 2d. 解析帖子数据
+#### 3c. 解析帖子日期
 
-对收集到的帖子文本，提取：
-- **发布日期**：解析 `datetime` 属性或帖子内时间文字（如"3月2日 22:08"、"1小时前"等）
-  - 若显示"X小时前"/"昨天"/"X天前"，换算为具体日期
-- **内容摘要**：取正文前 100 字，去掉转发标记和多余换行
-- **互动数据**：转发数、评论数、点赞数（从帖子底部操作栏提取，格式通常为"转发 12 评论 34 赞 56"）
+微博时间格式多样，统一转换为 `YYYY-MM-DD`：
 
-筛选：只保留发布日期 ≥ 截止日期的帖子。
+| 显示格式 | 转换方法 |
+|---------|---------|
+| `2026-03-10 22:08` | 直接截取前10位 |
+| `3月10日 22:08` | 结合当前年份拼接 |
+| `昨天 18:00` | 今日日期 -1 天 |
+| `X小时前` | 当前时间 -X 小时后取日期 |
+| `X天前` | 当前日期 -X 天 |
+| `刚刚` | 当前日期 |
 
-#### 2e. 生成 Word 文件
+#### 3d. 筛选目标日期并区分内容类型
 
-根据收集数据，使用 `docx` npm 库生成 Word 文件：
+从提取结果中筛选 `date === targetDate` 的帖子，按类型区分：
 
-1. 创建临时 JS 脚本 `{YOUR_OUTPUT_DIR}/gen_{昵称}.js`
-2. 用 `node gen_{昵称}.js` 运行
-3. 验证文件生成成功后删除临时脚本
+**原创微博：** 正文无转发标记（不以"//[@]"或"转发微博"开头）
+- 昵称、日期、内容类型（`原创`）、内容摘要、转发数、评论数、点赞数、帖子链接
+
+**转发微博：** 正文包含转发标记（`//` 引用原文）
+- 昵称、日期、内容类型（`转发`）、转发评论内容、被转发账号、原文摘要、帖子链接
+
+**互动（评论）：** 若微博主页"评论"tab可见，提取当日评论记录
+- 昵称、日期、内容类型（`评论`）、评论内容、被评论博主、被评论微博摘要、链接
+
+> 微博个人主页通常只展示原创和转发，评论记录一般不公开可见。若无法获取，标注"评论记录不可见"。
 
 ---
 
-## Word 文档格式规范
+### 第四步：生成 Excel 表格
 
-### 页面设置
+所有账号处理完毕后，创建 `C:/Users/yangc/Documents/Agent001/gen_weibo_{日期}.js`，运行后删除。
 
-```javascript
-// A4 竖向，四周 1 inch 边距
-page: {
-  size: { width: 11906, height: 16838 },
-  margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
-}
-// 内容宽度 = 9026 DXA
-```
+#### Excel 结构
 
-### 颜色方案
+- Sheet 名：`微博动态`
+- 列：`昵称` | `日期` | `内容类型` | `内容摘要` | `转发` | `评论` | `点赞` | `帖子链接`
+- 如某账号当日无任何动态，添加一行：昵称填账号名，其余列填 `（当日无动态）`
 
-| 用途 | 色值 |
-|------|------|
-| 主标题 | `1F4E79`（深海蓝） |
-| 副标题/章节 | `2E75B6`（中蓝） |
-| 表头背景 | `1F4E79` |
-| 表头文字 | `FFFFFF` |
-| 标签列背景 | `D5E8F0`（浅蓝） |
-| 偶数行 | `F7FBFF` |
-| 正文文字 | `000000` |
-| 副文字 | `888888` |
-| 警告文字 | `C0392B`（红） |
-
-### 字体
-
-全文使用 `Arial`。
-
-### 文档结构
-
-1. **主标题**：`{昵称}` （居中，52pt，深蓝 `1F4E79`，粗体）
-2. **副标题**：`微博近3个月动态报告`（居中，34pt，中蓝 `2E75B6`）
-3. **统计区间**：`统计周期：{3个月前日期} — {今日}`（居中，21pt，灰色 `888888`）
-4. **分隔线**（Paragraph 底部边框）
-5. **第一节：一、账号基本信息**（h1 标题 + 2列信息表格）
-   - 表格：左列标签宽 2256，右列内容宽 6770
-   - 包含：账号昵称、账号类型、粉丝数、关注数、转评赞总计、IP属地、视频累计播放（如有）
-6. **第二节：二、内容主题分布**（h1 标题 + 3列主题表格）
-   - 列：主题 | 内容描述 | 占比
-   - 根据帖子内容归纳 3-5 个主题分类
-7. **第三节：三、近3个月详细动态**（h1 标题 + 按月 h2 小节 + bullet 列表）
-   - 按月倒序排列（最新月份在前）
-   - 每条 bullet 格式：`{月日 时间} — {内容摘要}`
-8. **分隔线**
-9. **第四节：四、总结**（h1 标题 + 段落正文）
-   - 2-3 段综合分析
-   - 末行关键词（灰色斜体）
-
-### 页眉/页脚
+#### 生成代码模板
 
 ```javascript
-// 页眉：右对齐，带下边框线
-`{昵称} 微博动态报告`
+const ExcelJS = require('exceljs');
+const path = require('path');
 
-// 页脚：居中，页码 + 生成日期
-`第 {页码} 页  |  生成日期：{今日}`
+async function main() {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('微博动态');
+
+  ws.columns = [
+    { header: '昵称',     key: 'name',    width: 18 },
+    { header: '日期',     key: 'date',    width: 14 },
+    { header: '内容类型', key: 'type',    width: 10 },
+    { header: '内容摘要', key: 'content', width: 52 },
+    { header: '转发',     key: 'repost',  width: 8  },
+    { header: '评论',     key: 'comment', width: 8  },
+    { header: '点赞',     key: 'like',    width: 8  },
+    { header: '帖子链接', key: 'url',     width: 50 },
+  ];
+
+  // 表头样式
+  ws.getRow(1).eachCell(cell => {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E79' } };
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, name: '微软雅黑', size: 11 };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+  });
+  ws.getRow(1).height = 22;
+
+  // 数据行（用 rows 数组替换）
+  const rows = [
+    // 原创示例：
+    // { name: '主持人郭灿亮', date: '2026-03-10', type: '原创', content: '...', repost: '12', comment: '34', like: '560', url: 'https://weibo.com/...' },
+    // 转发示例：
+    // { name: 'M赵路', date: '2026-03-10', type: '转发', content: '转发评论 // @博主名: 原文摘要...', repost: '3', comment: '8', like: '45', url: 'https://weibo.com/...' },
+    // 无动态示例：
+    // { name: '胡盛呢', date: '（当日无动态）', type: '', content: '', repost: '', comment: '', like: '', url: '' },
+  ];
+
+  rows.forEach((r, i) => {
+    const row = ws.addRow(r);
+    row.height = 18;
+    const fill = i % 2 === 0
+      ? { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } }
+      : { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF7FBFF' } };
+    row.eachCell(cell => {
+      cell.fill = fill;
+      cell.font = { name: '微软雅黑', size: 10 };
+      cell.alignment = { vertical: 'middle', wrapText: true };
+    });
+    if (r.url && r.url.startsWith('http')) {
+      const urlCell = row.getCell('url');
+      urlCell.value = { text: r.url, hyperlink: r.url };
+      urlCell.font = { name: '微软雅黑', size: 10, color: { argb: 'FF0563C1' }, underline: true };
+    }
+  });
+
+  ws.views = [{ state: 'frozen', ySplit: 1 }];
+
+  const outPath = path.join('C:/Users/yangc/Documents/Agent001', `微博动态_TARGET_DATE.xlsx`);
+  await wb.xlsx.writeFile(outPath);
+  console.log('已生成：' + outPath);
+}
+
+main().catch(console.error);
 ```
 
-### 关键代码片段
-
-```javascript
-const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
-  HeadingLevel, AlignmentType, BorderStyle, WidthType, ShadingType,
-  LevelFormat, Header, Footer, PageNumber } = require('docx');
-const fs = require('fs');
-
-const border = { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" };
-const borders = { top: border, bottom: border, left: border, right: border };
-
-function cell(text, shading, bold = false, width = 4680) {
-  return new TableCell({
-    borders,
-    width: { size: width, type: WidthType.DXA },
-    shading: shading ? { fill: shading, type: ShadingType.CLEAR } : undefined,
-    margins: { top: 80, bottom: 80, left: 150, right: 150 },
-    children: [new Paragraph({
-      children: [new TextRun({ text, bold, font: "Arial", size: 20 })]
-    })]
-  });
-}
-
-function bullet(text) {
-  return new Paragraph({
-    numbering: { reference: "bullets", level: 0 },
-    spacing: { before: 40, after: 40 },
-    children: [new TextRun({ text, font: "Arial", size: 21 })]
-  });
-}
-
-function divider() {
-  return new Paragraph({
-    border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "CCCCCC", space: 1 } },
-    children: [new TextRun("")]
-  });
-}
-```
+> 将 `rows` 数组替换为实际数据，`TARGET_DATE` 替换为目标日期（如 `2026-03-10`）。
 
 ---
 
@@ -237,53 +213,30 @@ function divider() {
 
 ### 中文引号陷阱
 
-生成 JS 脚本时，如果帖子内容含有中文弯引号 `"` `"`，**必须**用单引号包裹该字符串，或用反引号（模板字符串），否则会破坏 JS 字符串语法：
+帖子内容中如含中文弯引号 `"` `"`，生成 JS 脚本时**必须用反引号**包裹字符串：
 
 ```javascript
-// 错误
-"他说"这场比赛很精彩""
-
-// 正确（单引号包裹）
-'他说"这场比赛很精彩"'
-
-// 正确（模板字符串）
-`他说"这场比赛很精彩"`
+// ✅ 正确
+content: `他说"这场比赛很精彩"`,
 ```
 
-实际操作：写 JS 脚本时，对所有 bullet/para 文本内容**统一使用反引号**（模板字符串），彻底规避此问题。
+### 账号无内容的处理
 
-### 帖子时间解析
+如该账号在目标日期无发布内容，Excel 中记录为：
 
-微博帖子的时间显示格式多样，需要处理：
-- `2026-03-02 22:08` → 直接解析
-- `3月2日 22:08` → 结合当前年份解析
-- `昨天 18:00` → 今天日期 -1
-- `X小时前` → 当前时间 -X 小时
-- `X天前` → 当前日期 -X 天
-- `刚刚` → 当前时间
-
-### 帖子数量极少的处理
-
-如果近3个月帖子数 < 5 条，或存在长期断更（> 30 天无内容），需要：
-- 在第三节上方添加红色警告说明
-- 在总结中明确指出更新频率低
+| 昵称 | 发布日期 | 内容摘要 | 帖子链接 |
+|------|---------|---------|---------|
+| 主持人郭灿亮 | （当日无发布） | | |
 
 ### 页面懒加载
 
-微博主页采用懒加载，滚动后需等待 1-1.5 秒再提取内容：
-
-```javascript
-// 每轮滚动后等待
-await new Promise(r => setTimeout(r, 1200));
-```
-
-在 Claude 实际操作时，每次 `evaluate_script` 调用之间自然有等待时间，通常足够。但如果发现帖子列表没有增加，可以多滚动几次再试。
+微博主页懒加载较慢，每次滚动后等待页面稳定再提取。若帖子数量没有增加，可多滚动一次再试。
 
 ---
 
 ## 处理完成后
 
-所有账号处理完毕后，汇总告知用户：
-- 每个账号生成的文件路径
-- 各账号近3个月帖子数量
-- 如有跳过的账号，说明原因
+汇总告知用户：
+- 生成的文件路径
+- 各账号在目标日期发布的帖子数量
+- 如有账号跳过，说明原因

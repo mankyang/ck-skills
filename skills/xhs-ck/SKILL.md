@@ -1,206 +1,228 @@
 ---
 name: xhs-ck
 description: 每月查看小红书监控账号的近3个月动态并生成Word报告。当用户输入"xhs-ck"、"查看小红书动态"、"生成小红书月报"、或提到要查看监控账号动态时，必须立即触发此 skill，按照标准流程依次处理所有账号。
-version: 1.0.0
+version: 2.0.0
 ---
 
-# 小红书月度动态监控 (xhs-ck)
-
-## 配置说明
-
-> ⚠️ 使用前必须修改以下两处配置：
-> 1. **监控账号列表** — 替换为你自己要监控的小红书账号
-> 2. **输出目录** — 替换为你本地的文件保存路径
-
----
+# 小红书动态监控 (xhs-ck)
 
 ## 监控账号列表
 
-> 修改此表格，填入你要监控的账号。userId 在小红书 App 个人主页 URL 中可找到。
-
-| 昵称 | userId | 搜索关键词 |
-|------|--------|------------|
-| 账号昵称1 | `请填入小红书userId` | 搜索用关键词 |
-| 账号昵称2 | `请填入小红书userId` | 搜索用关键词 |
+| 昵称 | userId |
+|------|--------|
+| 漂漂酱 | `5655ecbe50c4b41526f41339` |
+| 胡盛呢 | `604db41b00000000010031e0` |
+| M赵路 | `5c5af96b000000001100ef0f` |
+| 魔都小蔚 | `59618ebf5e87e712999c195b` |
+| 青青baby | `59ba17895e87e77c900d850d` |
 
 ## 输出目录
 
-所有 Word 文件保存到：`YOUR_OUTPUT_DIR`
+`C:/Users/yangc/Documents/Agent001/`
 
-> 示例：`C:/Users/yourname/Documents/reports/`
-
-文件命名格式：`{昵称}近3个月动态.docx`
+文件命名格式：`小红书动态_{查询日期}.xlsx`
 
 ---
 
 ## 完整工作流程
 
-### 第一步：检查登录状态
+### 第一步：确认查询日期
 
-调用 `check_login_status`。
+用户会告知要查看的日期（如"3月10日"），记录为 `targetDate`（格式 `YYYY-MM-DD`）。
 
-- ✅ 已登录 → 直接进入第二步
-- ❌ 未登录 → 告知用户需要重新登录，调用 `get_login_qrcode`，等待用户确认登录成功后继续
-
-> 登录失效是常见情况，不要跳过检查。
+如果用户没有指定日期，询问用户要查看哪一天的内容。
 
 ---
 
-### 第二步：逐账号处理
+### 第二步：确认浏览器登录状态
 
-对每个账号依次执行以下操作：
+调用 `list_pages` 检查是否有小红书页面。
 
-#### 2a. 获取 xsec_token
-
-调用 `search_feeds`，keyword 填该账号的搜索关键词，从返回结果中找到匹配该 userId 的条目，提取其 `xsecToken` 字段。
-
-> xsec_token 是 session 级别的访问令牌，每次都需要从搜索结果中新获取，不能复用旧值。
-
-如果搜索结果中找不到目标账号：
-- 换别的关键词再搜一次（如用小红书号、全名等）
-- 仍然找不到则跳过该账号并告知用户，继续处理下一个
-
-#### 2b. 获取用户资料
-
-调用 `user_profile`，传入 `user_id`（用监控列表中存储的值）和上一步获取的 `xsec_token`。
-
-返回数据可能很大（超出预览），此时完整数据会自动保存到临时 JSON 文件，用 `node -e` 脚本解析。
-
-#### 2c. 解析近3个月笔记
-
-**3个月截止时间计算：**
-
-```javascript
-// 今天往前推3个月
-const cutoff = new Date();
-cutoff.setMonth(cutoff.getMonth() - 3);
-const cutoffTs = cutoff.getTime() / 1000;
-```
-
-**从笔记 ID 提取发布时间戳（关键技巧）：**
-
-```javascript
-// 笔记 ID 的前8位十六进制字符 = Unix 时间戳（秒）
-const ts = parseInt(noteId.substring(0, 8), 16);
-const date = new Date(ts * 1000);
-```
-
-筛选出时间戳 ≥ cutoff 的笔记，提取：日期、标题、类型（视频/图文）、点赞数、评论数、收藏数。
-
-#### 2d. 生成 Word 文件
-
-根据收集到的数据，在输出目录下创建 `gen_{昵称}.js`，运行后删除。
+若无，调用 `new_page` 打开 `https://www.xiaohongshu.com`，调用 `take_screenshot` 确认：
+- ✅ 已登录（显示首页内容）→ 继续
+- ❌ 未登录（显示登录页）→ 提示用户在浏览器中手动登录，等待确认后继续
 
 ---
 
-## Word 文档格式规范
+### 第三步：逐账号抓取数据
 
-### 页面设置
+对每个账号依次执行：
 
-```javascript
-// A4 竖向，四周 1 inch 边距
-page: {
-  size: { width: 11906, height: 16838 },
-  margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
-}
-// 内容宽度 = 11906 - 1440*2 = 9026，但习惯用 9360（可微调）
+#### 3a. 打开账号主页
+
+```
+navigate_page → https://www.xiaohongshu.com/user/profile/{userId}
 ```
 
-### 颜色方案
+等待页面加载完成。
 
-| 用途 | 色值 |
-|------|------|
-| 表头背景 | `2C5F8A`（深蓝） |
-| 表头文字 | `FFFFFF`（白） |
-| 奇数行 | `FFFFFF`（白） |
-| 偶数行 | `F0F5FA`（浅蓝灰） |
-| 正文文字 | `333333` |
-| 警告文字 | `C0392B`（红） |
-| 章节标题 | `2C5F8A` |
-| 副标题 | `888888` |
+#### 3b. 提取笔记列表
 
-### 字体
-
-全文使用 `微软雅黑`。
-
-### 文档结构
-
-1. **主标题**：`{昵称}小红书近3个月动态报告`（居中，40pt，深蓝 `1A3A5C`，粗体）
-2. **副标题**：`博主：{昵称}  |  统计区间：{起始日期} ~ {今日}`（居中，22pt，灰色）
-3. **第一节：用户基本信息**（section 标题 + 信息表格）
-   - 信息表格：2列，左列为粗体标签（宽2000），右列为值（宽7360）
-   - 包含：昵称、小红书号、所在地、简介/内容方向、关注数、粉丝数、获赞与收藏、历史总笔记
-4. **第二节：近3个月发布笔记（共N篇）**（section 标题 + 笔记表格）
-   - 笔记表格列：发布日期、笔记标题、类型、点赞、评论
-   - 如有特殊情况（如长期停更、笔记数很少）用红色警告文字标注
-5. **第三节：综合分析**（section 标题 + 分析内容）
-   - 分析子项：发布节奏、内容主题、互动表现
-   - 每个子项用 `▌ 发布节奏` 格式的小标题 + 要点列表（bullet numbering）
-
-### 页眉/页脚
+调用 `evaluate_script` 提取页面中所有笔记链接及日期：
 
 ```javascript
-// 页眉：右对齐，带下边线
-`小红书动态报告 · {昵称}`
-
-// 页脚：居中
-`第 {页码} 页  ·  数据采集时间：{今日}`
+() => {
+  const links = Array.from(document.querySelectorAll('a[href*="/explore/"]'));
+  const notes = [];
+  const seen = new Set();
+  links.forEach(el => {
+    const href = el.getAttribute('href') || '';
+    const match = href.match(/\/explore\/([a-f0-9]{24})/);
+    if (match && !seen.has(match[1])) {
+      seen.add(match[1]);
+      const noteId = match[1];
+      const ts = parseInt(noteId.substring(0, 8), 16);
+      const date = new Date(ts * 1000).toISOString().slice(0, 10);
+      const title = el.querySelector('span')?.innerText?.trim() || '';
+      notes.push({ noteId, date, title });
+    }
+  });
+  return notes;
+}
 ```
 
-### 辅助函数模板
+> **原理**：小红书笔记 ID 前8位十六进制 = Unix 时间戳（秒），直接换算为日期，无需额外接口。
+
+#### 3c. 筛选目标日期
+
+从结果中筛选 `date === targetDate` 的笔记。
+
+如果页面加载的笔记不够（最新笔记日期仍早于 targetDate），说明该账号在目标日期无发布，直接跳过。
+
+#### 3c-2. 提取互动内容（评论区）
+
+在笔记列表页后，还需检查账号的**近期互动**——即该账号在他人笔记下发表的评论。
+
+> 小红书个人主页不直接展示评论记录，需通过以下方式补充：
+> - 若账号有"近期评论"入口（部分版本可见），点击进入提取
+> - 若无法直接获取评论记录，在备注列标注"评论记录不可见"
+
+#### 3d. 记录结果
+
+将该账号筛选到的数据记录入汇总列表，区分两类：
+
+**发布内容（原创笔记）：**
+- 昵称、发布日期、内容类型（`原创笔记`）、笔记标题、点赞数、评论数、收藏数、笔记链接
+
+**互动内容（评论/回复）：**
+- 昵称、互动日期、内容类型（`评论`）、评论内容摘要、被评论笔记标题、被评论笔记链接
+
+> 若评论记录不可见，该账号互动内容行填"评论记录不可见"。
+
+---
+
+### 第三步补充：提取笔记互动数据
+
+进入各笔记详情页可获取互动数（点赞/评论/收藏），但为避免逐篇打开页面耗时过长，优先从列表页提取可见数据。
+
+若列表页已返回互动数，直接使用：
 
 ```javascript
-const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
-  AlignmentType, BorderStyle, WidthType, ShadingType, VerticalAlign,
-  LevelFormat, Header, Footer, PageNumber } = require('docx');
-const fs = require('fs');
-
-const border = { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" };
-const borders = { top: border, bottom: border, left: border, right: border };
-const headerBorder = { style: BorderStyle.SINGLE, size: 1, color: "2C5F8A" };
-const headerBorders = { top: headerBorder, bottom: headerBorder, left: headerBorder, right: headerBorder };
-
-function cell(text, options = {}) {
-  return new TableCell({
-    borders: options.header ? headerBorders : borders,
-    width: { size: options.width || 2000, type: WidthType.DXA },
-    shading: options.header
-      ? { fill: "2C5F8A", type: ShadingType.CLEAR }
-      : options.alt
-      ? { fill: "F0F5FA", type: ShadingType.CLEAR }
-      : { fill: "FFFFFF", type: ShadingType.CLEAR },
-    margins: { top: 100, bottom: 100, left: 120, right: 120 },
-    verticalAlign: VerticalAlign.CENTER,
-    children: [new Paragraph({
-      alignment: options.center ? AlignmentType.CENTER : AlignmentType.LEFT,
-      children: [new TextRun({
-        text,
-        bold: options.header || options.bold,
-        color: options.header ? "FFFFFF" : options.warn ? "C0392B" : "333333",
-        size: options.header ? 22 : 20,
-        font: "微软雅黑"
-      })]
-    })]
+() => {
+  const links = Array.from(document.querySelectorAll('a[href*="/explore/"]'));
+  const notes = [];
+  const seen = new Set();
+  links.forEach(el => {
+    const href = el.getAttribute('href') || '';
+    const match = href.match(/\/explore\/([a-f0-9]{24})/);
+    if (match && !seen.has(match[1])) {
+      seen.add(match[1]);
+      const noteId = match[1];
+      const ts = parseInt(noteId.substring(0, 8), 16);
+      const date = new Date(ts * 1000).toISOString().slice(0, 10);
+      const title = el.querySelector('span')?.innerText?.trim() || '';
+      // 互动数（从卡片底部提取）
+      const card = el.closest('section, [class*="note"], [class*="card"]');
+      const likes = card?.querySelector('[class*="like"], [class*="heart"]')?.innerText?.trim() || '';
+      const comments = card?.querySelector('[class*="comment"]')?.innerText?.trim() || '';
+      notes.push({ noteId, date, title, likes, comments });
+    }
   });
-}
-
-function sectionTitle(text) {
-  return new Paragraph({
-    spacing: { before: 320, after: 160 },
-    border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: "2C5F8A", space: 4 } },
-    children: [new TextRun({ text, bold: true, size: 28, color: "2C5F8A", font: "微软雅黑" })]
-  });
-}
-
-function infoRow(label, value) {
-  return new TableRow({
-    children: [
-      cell(label, { width: 2000, bold: true }),
-      cell(value, { width: 7360 }),
-    ]
-  });
+  return notes;
 }
 ```
+
+---
+
+### 第四步：生成 Excel 表格
+
+所有账号处理完毕后，创建 `C:/Users/yangc/Documents/Agent001/gen_xhs_{日期}.js`，运行后删除。
+
+#### Excel 结构
+
+- Sheet 名：`小红书动态`
+- 列：`昵称` | `日期` | `内容类型` | `标题/内容` | `点赞` | `评论` | `收藏` | `链接`
+- 如某账号当日无任何内容，添加一行：昵称填账号名，其余列填 `（当日无动态）`
+
+#### 生成代码模板
+
+```javascript
+const ExcelJS = require('exceljs');
+const path = require('path');
+
+async function main() {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('小红书动态');
+
+  ws.columns = [
+    { header: '昵称',     key: 'name',    width: 16 },
+    { header: '日期',     key: 'date',    width: 14 },
+    { header: '内容类型', key: 'type',    width: 12 },
+    { header: '标题/内容',key: 'title',   width: 48 },
+    { header: '点赞',     key: 'likes',   width: 8  },
+    { header: '评论',     key: 'comments',width: 8  },
+    { header: '收藏',     key: 'collects',width: 8  },
+    { header: '链接',     key: 'url',     width: 55 },
+  ];
+
+  // 表头样式
+  ws.getRow(1).eachCell(cell => {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2C5F8A' } };
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, name: '微软雅黑', size: 11 };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+  });
+  ws.getRow(1).height = 22;
+
+  // 数据行（用 rows 数组替换）
+  const rows = [
+    // 原创笔记示例：
+    // { name: '漂漂酱', date: '2026-03-10', type: '原创笔记', title: '...', likes: '1.2万', comments: '320', collects: '890', url: 'https://...' },
+    // 评论示例：
+    // { name: '漂漂酱', date: '2026-03-10', type: '评论', title: '回复@某人：内容摘要...', likes: '', comments: '', collects: '', url: 'https://...' },
+    // 无动态示例：
+    // { name: '胡盛呢', date: '（当日无动态）', type: '', title: '', likes: '', comments: '', collects: '', url: '' },
+  ];
+
+  rows.forEach((r, i) => {
+    const row = ws.addRow(r);
+    row.height = 18;
+    const fill = i % 2 === 0
+      ? { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } }
+      : { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F5FA' } };
+    row.eachCell(cell => {
+      cell.fill = fill;
+      cell.font = { name: '微软雅黑', size: 10 };
+      cell.alignment = { vertical: 'middle', wrapText: true };
+    });
+    if (r.url && r.url.startsWith('http')) {
+      const urlCell = row.getCell('url');
+      urlCell.value = { text: r.url, hyperlink: r.url };
+      urlCell.font = { name: '微软雅黑', size: 10, color: { argb: 'FF0563C1' }, underline: true };
+    }
+  });
+
+  // 冻结首行
+  ws.views = [{ state: 'frozen', ySplit: 1 }];
+
+  const outPath = path.join('C:/Users/yangc/Documents/Agent001', `小红书动态_TARGET_DATE.xlsx`);
+  await wb.xlsx.writeFile(outPath);
+  console.log('已生成：' + outPath);
+}
+
+main().catch(console.error);
+```
+
+> 将 `rows` 数组替换为实际数据，`TARGET_DATE` 替换为目标日期（如 `2026-03-10`）。
 
 ---
 
@@ -208,47 +230,26 @@ function infoRow(label, value) {
 
 ### 中文引号陷阱
 
-标题、文案中如含有中文弯引号 `"` `"`，**必须**把该字符串改用单引号包裹：
+笔记标题中如含中文弯引号 `"` `"`，生成 JS 脚本时**必须用反引号**包裹字符串：
 
 ```javascript
-// ❌ 错误（中文引号会破坏 JS 字符串解析）
-"东方人认为的"高级感""
-
 // ✅ 正确
-'东方人认为的"高级感"'
+title: `东方人认为的"高级感"`,
 ```
 
-### 笔记数量极少的处理
+### 账号无内容的处理
 
-如果近3个月笔记数 < 3 篇，或存在长期断更（>30天无内容），需要：
-- 在笔记表格上方添加红色警告说明
-- 在分析节"发布节奏"中明确指出停更时长
+如该账号在目标日期无发布内容，Excel 中该行记录为：
 
-### 大文件解析示例
-
-当 user_profile 返回数据过大，用以下脚本解析：
-
-```javascript
-// node -e "..."
-const data = JSON.parse(require('fs').readFileSync('PATH_TO_JSON', 'utf8'));
-const notes = data.notes || data.user?.notes || [];
-const cutoff = Math.floor(new Date(new Date().setMonth(new Date().getMonth()-3)).getTime()/1000);
-const recent = notes.filter(n => parseInt((n.id||n.note_id||'').substring(0,8),16) >= cutoff);
-console.log(JSON.stringify(recent.map(n => ({
-  id: n.id||n.note_id,
-  title: n.title||n.display_title,
-  type: n.type,
-  likes: n.interact_info?.liked_count || n.liked_count || 0,
-  comments: n.interact_info?.comment_count || n.comment_count || 0,
-  date: new Date(parseInt((n.id||n.note_id).substring(0,8),16)*1000).toISOString().slice(0,10)
-})), null, 2));
-```
+| 昵称 | 发布日期 | 笔记标题 | 笔记链接 |
+|------|---------|---------|---------|
+| 漂漂酱 | （当日无发布） | | |
 
 ---
 
 ## 处理完成后
 
-所有账号处理完毕后，汇总告知用户：
-- 每个账号生成的文件路径
-- 各账号近3个月笔记数量
-- 如有跳过的账号，说明原因
+汇总告知用户：
+- 生成的文件路径
+- 各账号在目标日期发布的笔记数量
+- 如有账号跳过，说明原因
