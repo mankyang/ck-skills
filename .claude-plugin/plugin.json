@@ -1,9 +1,9 @@
 {
   "name": "social-monitor",
-  "description": "Monthly social media monitoring plugin for Xiaohongshu (XHS) and Weibo. Automatically visits tracked accounts, collects posts from the past 3 months, and generates formatted Word reports.",
+  "description": "Social media monitoring plugin for Xiaohongshu (XHS) and Weibo. Uses Chrome DevTools to visit tracked accounts, collect posts and interactions for a specified date, and generate Excel reports.",
   "author": {
     "name": "yangc",
     "email": ""
   },
-  "version": "2.1.0"
+  "version": "3.0.0"
 }

@@ -1,35 +1,25 @@
 # Social Monitor Plugin for Claude Code
 
-每月自动监控小红书和微博账号近3个月动态，并生成格式化 Word 报告。
-
-数据采集由 [MediaCrawler](https://github.com/NanmiCoder/MediaCrawler) 完成，Claude 负责读取数据、分析内容、生成 Word 报告。
+监控小红书和微博账号的指定日期动态，通过 Chrome 浏览器抓取数据，生成 Excel 表格。
 
 ## 包含的 Skills
 
 | Skill | 触发方式 | 功能 |
 |-------|---------|------|
-| `xhs-ck` | 输入"xhs-ck"或"查看小红书动态" | 抓取小红书账号近3个月笔记，生成 Word 报告 |
-| `weibo-ck` | 输入"weibo-ck"或"查看微博动态" | 抓取微博账号近3个月帖子，生成 Word 报告 |
-| `douyin-ck` | 输入"douyin-ck"或"查看抖音动态" | 抓取抖音账号近3个月视频，生成 Word 报告 |
+| `xhs-ck` | 输入"xhs-ck"或"查看小红书动态" | 抓取小红书账号指定日期的发布和互动内容，生成 Excel 表格 |
+| `weibo-ck` | 输入"weibo-ck"或"查看微博动态" | 抓取微博账号指定日期的发布和互动内容，生成 Excel 表格 |
 
 ## 前置依赖
 
-### 1. MediaCrawler
+### Node.js + exceljs
 
 ```bash
-git clone https://github.com/NanmiCoder/MediaCrawler.git
-cd MediaCrawler
-uv sync
-uv run playwright install
+npm install exceljs
 ```
 
-> 需要 Python >= 3.11，[uv](https://github.com/astral-sh/uv) 包管理工具
+### Chrome 浏览器
 
-### 2. Node.js + docx
-
-```bash
-npm install docx
-```
+需要通过 Chrome DevTools MCP 控制浏览器。确保 Claude Code 已配置 `chrome-devtools` MCP server。
 
 ## 安装本插件
 
@@ -49,100 +39,86 @@ git clone https://github.com/mankyang/ck-skills.git social-monitor
 
 ## 配置
 
-安装后编辑两个 SKILL.md，填入你的账号和路径：
+安装后编辑两个 SKILL.md，填入你的账号和输出路径：
 
 ### 小红书（xhs-ck）
 
-编辑 `~/.claude/plugins/social-monitor/skills/xhs-ck/SKILL.md`：
+编辑 `skills/xhs-ck/SKILL.md`，替换监控账号列表和输出目录：
 
 ```markdown
-### 监控账号列表
+## 监控账号列表
 
 | 昵称 | userId |
 |------|--------|
-| 漂漂酱 | `5655ecbe50c4b41526f41339` |
-| 胡盛呢 | `604db41b00000000010031e0` |
+| 账号昵称1 | `请填入小红书userId` |
+| 账号昵称2 | `请填入小红书userId` |
 
-### 路径配置
+## 输出目录
 
-MEDIACRAWLER_PATH = C:/path/to/MediaCrawler
-OUTPUT_DIR        = C:/path/to/output/
+所有文件保存到：`YOUR_OUTPUT_DIR`
 ```
 
-### 抖音（douyin-ck）
-
-编辑 `~/.claude/plugins/social-monitor/skills/douyin-ck/SKILL.md`：
-
-```markdown
-### 监控账号列表
-
-| 昵称 | sec_uid 或完整主页 URL |
-|------|----------------------|
-| 英超解说郭灿亮 | `MS4wLjABAAAA...` |
-
-### 路径配置
-
-MEDIACRAWLER_PATH = C:/path/to/MediaCrawler
-OUTPUT_DIR        = C:/path/to/output/
-```
-
-> sec_uid 获取方式：浏览器打开目标账号抖音主页，复制 URL 中 `/user/` 后面的字符串，或直接填完整主页 URL。
+> userId 在小红书 App 个人主页 URL 中可找到。
 
 ### 微博（weibo-ck）
 
-编辑 `~/.claude/plugins/social-monitor/skills/weibo-ck/SKILL.md`：
+编辑 `skills/weibo-ck/SKILL.md`，替换监控账号列表和输出目录：
 
 ```markdown
-### 监控账号列表
+## 监控账号列表
 
-| 昵称 | userId（微博uid） | 简介 |
-|------|-----------------|------|
-| 郭灿亮 | `1548718464` | 体育解说 |
-| M赵路 | `1881976852` | 主持人 |
+| 昵称 | userId（微博uid） |
+|------|-----------------|
+| 账号昵称1 | `请填入微博uid` |
+| 账号昵称2 | `请填入微博uid` |
 
-### 路径配置
+## 输出目录
 
-MEDIACRAWLER_PATH = C:/path/to/MediaCrawler
-OUTPUT_DIR        = C:/path/to/output/
+所有文件保存到：`YOUR_OUTPUT_DIR`
 ```
+
+> 微博 uid 可在账号主页 URL `weibo.com/u/{uid}` 中找到。
 
 ## 使用
 
-配置完成后，在 Claude Code 中直接输入触发词：
+配置完成后，在 Claude Code 中输入触发词并告知要查看的日期：
 
 ```
-xhs-ck
+xhs-ck 查看3月10日
 ```
 ```
-weibo-ck
+weibo-ck 查看3月10日
 ```
 
 Claude 会自动：
-1. 将账号列表写入 MediaCrawler 配置
-2. 运行 MediaCrawler 抓取数据
-3. 解析近3个月内容
-4. 为每个账号生成 Word 报告
+1. 用 Chrome 浏览器逐账号访问主页
+2. 提取指定日期的发布和互动内容
+3. 生成 Excel 表格
 
-## 输出示例
+## 输出
 
-- `某账号近3个月动态.docx`（小红书）
-- `某账号_微博近3个月动态报告.docx`（微博）
+- `小红书动态_{日期}.xlsx`
+- `微博动态_{日期}.xlsx`
 
-每份报告包含：
-- 账号基本信息（粉丝数、简介、IP属地等）
-- 近3个月发布内容列表（含互动数据）
-- 综合分析（发布节奏、内容主题、互动表现）
+每份表格包含：
+
+| 列 | 说明 |
+|----|------|
+| 昵称 | 账号名称 |
+| 日期 | 发布/互动日期 |
+| 内容类型 | 原创笔记 / 评论（小红书）；原创 / 转发 / 评论（微博） |
+| 标题/内容 | 笔记标题或内容摘要 |
+| 互动数据 | 点赞、评论、收藏/转发数 |
+| 链接 | 原帖链接（可点击） |
 
 ## 更新日志
 
-### v2.1.0
-- 新增 `douyin-ck` skill，支持抖音创作者近3个月视频监控
-- 配置方式：填入 sec_uid 或完整主页 URL
-
-### v2.0.0
-- 数据采集改用 MediaCrawler，稳定性大幅提升
-- 不再依赖 Chrome DevTools MCP 实时操控浏览器
-- 新增 creator_info 字段（粉丝数、IP属地等更完整）
+### v3.0.0
+- 数据采集改用 Chrome DevTools，直接操控浏览器，无需额外 MCP 或爬虫依赖
+- 输出格式从 Word 报告改为 Excel 表格（exceljs）
+- 支持按指定日期筛选内容
+- 新增互动内容字段：区分原创、转发、评论三种类型
+- 移除 douyin-ck skill
 
 ### v1.0.0
-- 初始版本，基于 XHS MCP + Chrome DevTools MCP 实时抓取
+- 初始版本，基于 XHS MCP + Chrome DevTools MCP 实时抓取，输出 Word 报告
